@@ -15,11 +15,20 @@ import (
 	"gioui.org/op/clip"
 )
 
+type TextureFilter uint8
+
+const (
+	FilterNearest TextureFilter = iota
+	FilterLinear
+	FilterLinearMipmapLinear
+)
+
 // ImageOp sets the brush to an image.
 type ImageOp struct {
 	uniform bool
 	color   color.NRGBA
 	src     *image.RGBA
+	filter  TextureFilter
 
 	// handle is a key to uniquely identify this ImageOp
 	// in a map of cached textures.
@@ -51,6 +60,10 @@ type PaintOp struct {
 // ensure that changes to an image is reflected in the display of
 // it.
 func NewImageOp(src image.Image) ImageOp {
+	return NewImageOpFilter(src, FilterLinear)
+}
+
+func NewImageOpFilter(src image.Image, filter TextureFilter) ImageOp {
 	switch src := src.(type) {
 	case *image.Uniform:
 		col := color.NRGBAModel.Convert(src.C).(color.NRGBA)
@@ -62,6 +75,7 @@ func NewImageOp(src image.Image) ImageOp {
 		return ImageOp{
 			src:    src,
 			handle: new(int),
+			filter: filter,
 		}
 	}
 
@@ -95,6 +109,7 @@ func (i ImageOp) Add(o *op.Ops) {
 	}
 	data := ops.Write2(&o.Internal, ops.TypeImageLen, i.src, i.handle)
 	data[0] = byte(ops.TypeImage)
+	data[1] = byte(i.filter)
 }
 
 func (c ColorOp) Add(o *op.Ops) {

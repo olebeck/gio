@@ -164,6 +164,7 @@ type material struct {
 // imageOpData is the shadow of paint.ImageOp.
 type imageOpData struct {
 	src    *image.RGBA
+	filter driver.TextureFilter
 	handle interface{}
 }
 
@@ -181,6 +182,7 @@ func decodeImageOp(data []byte, refs []interface{}) imageOpData {
 	}
 	return imageOpData{
 		src:    refs[0].(*image.RGBA),
+		filter: driver.TextureFilter(data[1]),
 		handle: handle,
 	}
 }
@@ -436,7 +438,7 @@ func (r *renderer) texHandle(cache *resourceCache, data imageOpData) driver.Text
 	if tex.tex != nil {
 		return tex.tex
 	}
-	handle, err := r.ctx.NewTexture(driver.TextureFormatSRGBA, data.src.Bounds().Dx(), data.src.Bounds().Dy(), driver.FilterLinearMipmapLinear, driver.FilterLinear, driver.BufferBindingTexture)
+	handle, err := r.ctx.NewTexture(driver.TextureFormatSRGBA, data.src.Bounds().Dx(), data.src.Bounds().Dy(), data.filter, data.filter, driver.BufferBindingTexture)
 	if err != nil {
 		panic(err)
 	}
