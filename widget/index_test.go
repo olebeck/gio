@@ -1,9 +1,12 @@
 package widget
 
 import (
+	"bytes"
+	"io"
 	"testing"
 
 	nsareg "eliasnaur.com/font/noto/sans/arabic/regular"
+	"gioui.org/font"
 	"gioui.org/font/opentype"
 	"gioui.org/text"
 	"golang.org/x/image/font/gofont/goregular"
@@ -13,60 +16,74 @@ import (
 // makePosTestText returns two bidi samples of shaped text at the given
 // font size and wrapped to the given line width. The runeLimit, if nonzero,
 // truncates the sample text to ensure shorter output for expensive tests.
-func makePosTestText(fontSize, lineWidth int, alignOpposite bool) (bidiLTR, bidiRTL []text.Glyph) {
+func makePosTestText(fontSize, lineWidth int, alignOpposite bool) (source string, bidiLTR, bidiRTL []text.Glyph) {
 	ltrFace, _ := opentype.Parse(goregular.TTF)
 	rtlFace, _ := opentype.Parse(nsareg.TTF)
 
-	shaper := text.NewShaper([]text.FontFace{
+	shaper := text.NewShaper([]font.FontFace{
 		{
-			Font: text.Font{Typeface: "LTR"},
+			Font: font.Font{Typeface: "LTR"},
 			Face: ltrFace,
 		},
 		{
-			Font: text.Font{Typeface: "RTL"},
+			Font: font.Font{Typeface: "RTL"},
 			Face: rtlFace,
 		},
 	})
 	// bidiSource is crafted to contain multiple consecutive RTL runs (by
 	// changing scripts within the RTL).
 	bidiSource := "The quick سماء שלום لا fox تمط שלום غير the lazy dog."
-	ltrParams := text.Parameters{Font: text.Font{Typeface: "LTR"}, PxPerEm: fixed.I(fontSize)}
-	rtlParams := text.Parameters{Alignment: text.End, Font: text.Font{Typeface: "RTL"}, PxPerEm: fixed.I(fontSize)}
+	ltrParams := text.Parameters{
+		Font:     font.Font{Typeface: "LTR"},
+		PxPerEm:  fixed.I(fontSize),
+		MaxWidth: lineWidth,
+		MinWidth: lineWidth,
+		Locale:   english,
+	}
+	rtlParams := text.Parameters{
+		Alignment: text.End,
+		Font:      font.Font{Typeface: "RTL"},
+		PxPerEm:   fixed.I(fontSize),
+		MaxWidth:  lineWidth,
+		MinWidth:  lineWidth,
+		Locale:    arabic,
+	}
 	if alignOpposite {
 		ltrParams.Alignment = text.End
 		rtlParams.Alignment = text.Start
 	}
-	shaper.LayoutString(ltrParams, lineWidth, lineWidth, english, bidiSource)
+	shaper.LayoutString(ltrParams, bidiSource)
 	for g, ok := shaper.NextGlyph(); ok; g, ok = shaper.NextGlyph() {
 		bidiLTR = append(bidiLTR, g)
 	}
-	shaper.LayoutString(rtlParams, lineWidth, lineWidth, arabic, bidiSource)
+	shaper.LayoutString(rtlParams, bidiSource)
 	for g, ok := shaper.NextGlyph(); ok; g, ok = shaper.NextGlyph() {
 		bidiRTL = append(bidiRTL, g)
 	}
-	return bidiLTR, bidiRTL
+	return bidiSource, bidiLTR, bidiRTL
 }
 
 // makeAccountingTestText shapes text designed to stress rune accounting
 // logic within the index.
-func makeAccountingTestText(fontSize, lineWidth int) (txt []text.Glyph) {
+func makeAccountingTestText(str string, fontSize, lineWidth int) (txt []text.Glyph) {
 	ltrFace, _ := opentype.Parse(goregular.TTF)
 	rtlFace, _ := opentype.Parse(nsareg.TTF)
 
-	shaper := text.NewShaper([]text.FontFace{{
-		Font: text.Font{Typeface: "LTR"},
+	shaper := text.NewShaper([]font.FontFace{{
+		Font: font.Font{Typeface: "LTR"},
 		Face: ltrFace,
 	},
 		{
-			Font: text.Font{Typeface: "RTL"},
+			Font: font.Font{Typeface: "RTL"},
 			Face: rtlFace,
 		},
 	})
-	// bidiSource is crafted to contain multiple consecutive RTL runs (by
-	// changing scripts within the RTL).
-	bidiSource := "The\nquick سماء של\nום لا fox\nتمط של\nום."
-	params := text.Parameters{PxPerEm: fixed.I(fontSize)}
-	shaper.LayoutString(params, 0, lineWidth, english, bidiSource)
+	params := text.Parameters{
+		PxPerEm:  fixed.I(fontSize),
+		MaxWidth: lineWidth,
+		Locale:   english,
+	}
+	shaper.LayoutString(params, str)
 	for g, ok := shaper.NextGlyph(); ok; g, ok = shaper.NextGlyph() {
 		txt = append(txt, g)
 	}
@@ -78,17 +95,23 @@ func getGlyphs(fontSize, minWidth, lineWidth int, align text.Alignment, str stri
 	ltrFace, _ := opentype.Parse(goregular.TTF)
 	rtlFace, _ := opentype.Parse(nsareg.TTF)
 
-	shaper := text.NewShaper([]text.FontFace{{
-		Font: text.Font{Typeface: "LTR"},
+	shaper := text.NewShaper([]font.FontFace{{
+		Font: font.Font{Typeface: "LTR"},
 		Face: ltrFace,
 	},
 		{
-			Font: text.Font{Typeface: "RTL"},
+			Font: font.Font{Typeface: "RTL"},
 			Face: rtlFace,
 		},
 	})
-	params := text.Parameters{PxPerEm: fixed.I(fontSize), Alignment: align}
-	shaper.LayoutString(params, minWidth, lineWidth, english, str)
+	params := text.Parameters{
+		PxPerEm:   fixed.I(fontSize),
+		Alignment: align,
+		MinWidth:  minWidth,
+		MaxWidth:  lineWidth,
+		Locale:    english,
+	}
+	shaper.LayoutString(params, str)
 	for g, ok := shaper.NextGlyph(); ok; g, ok = shaper.NextGlyph() {
 		txt = append(txt, g)
 	}
@@ -146,10 +169,10 @@ func TestIndexPositionWhitespace(t *testing.T) {
 				{x: fixed.Int26_6(832), y: 16, ascent: fixed.Int26_6(968), descent: fixed.Int26_6(216)},
 				{x: fixed.Int26_6(832), y: 35, ascent: fixed.Int26_6(968), descent: fixed.Int26_6(216), runes: 1, lineCol: screenPos{line: 1}},
 				{x: fixed.Int26_6(832), y: 54, ascent: fixed.Int26_6(968), descent: fixed.Int26_6(216), runes: 2, lineCol: screenPos{line: 2}},
-				{x: fixed.Int26_6(0), y: 73, ascent: fixed.Int26_6(968), descent: fixed.Int26_6(216), runes: 3, lineCol: screenPos{line: 3}},
-				{x: fixed.Int26_6(570), y: 73, ascent: fixed.Int26_6(968), descent: fixed.Int26_6(216), runes: 4, lineCol: screenPos{line: 3, col: 1}},
-				{x: fixed.Int26_6(1140), y: 73, ascent: fixed.Int26_6(968), descent: fixed.Int26_6(216), runes: 5, lineCol: screenPos{line: 3, col: 2}},
-				{x: fixed.Int26_6(1652), y: 73, ascent: fixed.Int26_6(968), descent: fixed.Int26_6(216), runes: 6, lineCol: screenPos{line: 3, col: 3}},
+				{x: fixed.Int26_6(6), y: 73, ascent: fixed.Int26_6(968), descent: fixed.Int26_6(216), runes: 3, lineCol: screenPos{line: 3}},
+				{x: fixed.Int26_6(576), y: 73, ascent: fixed.Int26_6(968), descent: fixed.Int26_6(216), runes: 4, lineCol: screenPos{line: 3, col: 1}},
+				{x: fixed.Int26_6(1146), y: 73, ascent: fixed.Int26_6(968), descent: fixed.Int26_6(216), runes: 5, lineCol: screenPos{line: 3, col: 2}},
+				{x: fixed.Int26_6(1658), y: 73, ascent: fixed.Int26_6(968), descent: fixed.Int26_6(216), runes: 6, lineCol: screenPos{line: 3, col: 3}},
 			},
 		},
 		{
@@ -167,6 +190,7 @@ func TestIndexPositionWhitespace(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			glyphs := getGlyphs(16, 0, 200, tc.align, tc.str)
 			var gi glyphIndex
+			gi.reset()
 			for _, g := range glyphs {
 				gi.Glyph(g)
 			}
@@ -194,7 +218,7 @@ func TestIndexPositionWhitespace(t *testing.T) {
 func TestIndexPositionBidi(t *testing.T) {
 	fontSize := 16
 	lineWidth := fontSize * 10
-	bidiLTRText, bidiRTLText := makePosTestText(fontSize, lineWidth, false)
+	_, bidiLTRText, bidiRTLText := makePosTestText(fontSize, lineWidth, false)
 	type testcase struct {
 		name       string
 		glyphs     []text.Glyph
@@ -223,6 +247,7 @@ func TestIndexPositionBidi(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var gi glyphIndex
+			gi.reset()
 			for _, g := range tc.glyphs {
 				gi.Glyph(g)
 			}
@@ -267,19 +292,22 @@ func TestIndexPositionBidi(t *testing.T) {
 		})
 	}
 }
+
 func TestIndexPositionLines(t *testing.T) {
 	fontSize := 16
 	lineWidth := fontSize * 10
-	bidiLTRText, bidiRTLText := makePosTestText(fontSize, lineWidth, false)
-	bidiLTRTextOpp, bidiRTLTextOpp := makePosTestText(fontSize, lineWidth, true)
+	source1, bidiLTRText, bidiRTLText := makePosTestText(fontSize, lineWidth, false)
+	source2, bidiLTRTextOpp, bidiRTLTextOpp := makePosTestText(fontSize, lineWidth, true)
 	type testcase struct {
 		name          string
+		source        string
 		glyphs        []text.Glyph
 		expectedLines []lineInfo
 	}
 	for _, tc := range []testcase{
 		{
 			name:   "bidi ltr",
+			source: source1,
 			glyphs: bidiLTRText,
 			expectedLines: []lineInfo{
 				{
@@ -318,6 +346,7 @@ func TestIndexPositionLines(t *testing.T) {
 		},
 		{
 			name:   "bidi rtl",
+			source: source1,
 			glyphs: bidiRTLText,
 			expectedLines: []lineInfo{
 				{
@@ -348,10 +377,11 @@ func TestIndexPositionLines(t *testing.T) {
 		},
 		{
 			name:   "bidi ltr opposite alignment",
+			source: source2,
 			glyphs: bidiLTRTextOpp,
 			expectedLines: []lineInfo{
 				{
-					xOff:    fixed.Int26_6(3072),
+					xOff:    fixed.Int26_6(3107),
 					yOff:    22,
 					glyphs:  15,
 					width:   fixed.Int26_6(7133),
@@ -359,7 +389,7 @@ func TestIndexPositionLines(t *testing.T) {
 					descent: fixed.Int26_6(756),
 				},
 				{
-					xOff:    fixed.Int26_6(2304),
+					xOff:    fixed.Int26_6(2335),
 					yOff:    56,
 					glyphs:  15,
 					width:   fixed.Int26_6(7905),
@@ -367,7 +397,7 @@ func TestIndexPositionLines(t *testing.T) {
 					descent: fixed.Int26_6(756),
 				},
 				{
-					xOff:    fixed.Int26_6(1408),
+					xOff:    fixed.Int26_6(1427),
 					yOff:    90,
 					glyphs:  18,
 					width:   fixed.Int26_6(8813),
@@ -375,7 +405,7 @@ func TestIndexPositionLines(t *testing.T) {
 					descent: fixed.Int26_6(756),
 				},
 				{
-					xOff:    fixed.Int26_6(8192),
+					xOff:    fixed.Int26_6(8206),
 					yOff:    117,
 					glyphs:  4,
 					width:   fixed.Int26_6(2034),
@@ -386,10 +416,11 @@ func TestIndexPositionLines(t *testing.T) {
 		},
 		{
 			name:   "bidi rtl opposite alignment",
+			source: source2,
 			glyphs: bidiRTLTextOpp,
 			expectedLines: []lineInfo{
 				{
-					xOff:    fixed.Int26_6(384),
+					xOff:    fixed.Int26_6(404),
 					yOff:    22,
 					glyphs:  20,
 					width:   fixed.Int26_6(9836),
@@ -397,7 +428,7 @@ func TestIndexPositionLines(t *testing.T) {
 					descent: fixed.Int26_6(756),
 				},
 				{
-					xOff:    fixed.Int26_6(1408),
+					xOff:    fixed.Int26_6(1439),
 					yOff:    56,
 					glyphs:  19,
 					width:   fixed.Int26_6(8801),
@@ -405,7 +436,7 @@ func TestIndexPositionLines(t *testing.T) {
 					descent: fixed.Int26_6(756),
 				},
 				{
-					xOff:    fixed.Int26_6(4352),
+					xOff:    fixed.Int26_6(4388),
 					yOff:    90,
 					glyphs:  13,
 					width:   fixed.Int26_6(5852),
@@ -417,6 +448,7 @@ func TestIndexPositionLines(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var gi glyphIndex
+			gi.reset()
 			for _, g := range tc.glyphs {
 				gi.Glyph(g)
 			}
@@ -439,15 +471,20 @@ func TestIndexPositionLines(t *testing.T) {
 func TestIndexPositionRunes(t *testing.T) {
 	fontSize := 16
 	lineWidth := fontSize * 10
-	testText := makeAccountingTestText(fontSize, lineWidth)
+	// source is crafted to contain multiple consecutive RTL runs (by
+	// changing scripts within the RTL).
+	source := "The\nquick سماء של\nום لا fox\nتمط של\nום."
+	testText := makeAccountingTestText(source, fontSize, lineWidth)
 	type testcase struct {
 		name     string
+		source   string
 		glyphs   []text.Glyph
 		expected []combinedPos
 	}
 	for _, tc := range []testcase{
 		{
 			name:   "many newlines",
+			source: source,
 			glyphs: testText,
 			expected: []combinedPos{
 				{runes: 0, lineCol: screenPos{line: 0, col: 0}, runIndex: 0, towardOrigin: false},
@@ -496,6 +533,7 @@ func TestIndexPositionRunes(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var gi glyphIndex
+			gi.reset()
 			for _, g := range tc.glyphs {
 				gi.Glyph(g)
 			}
@@ -536,5 +574,234 @@ func printGlyphs(t *testing.T, glyphs []text.Glyph) {
 	t.Helper()
 	for i, g := range glyphs {
 		t.Logf("glyphs[%2d] = {ID: 0x%013x, Flags: %4s, Advance: %4d(%6v), Runes: %d, Y: %3d, X: %4d(%6v)} ", i, g.ID, g.Flags, g.Advance, g.Advance, g.Runes, g.Y, g.X, g.X)
+	}
+}
+
+func TestGraphemeReaderNext(t *testing.T) {
+	latinDoc := bytes.NewReader([]byte(latinDocument))
+	arabicDoc := bytes.NewReader([]byte(arabicDocument))
+	emojiDoc := bytes.NewReader([]byte(emojiDocument))
+	complexDoc := bytes.NewReader([]byte(complexDocument))
+	type testcase struct {
+		name  string
+		input *bytes.Reader
+		read  func() ([]rune, bool)
+	}
+	var pr graphemeReader
+	for _, tc := range []testcase{
+		{
+			name:  "latin",
+			input: latinDoc,
+			read:  pr.next,
+		},
+		{
+			name:  "arabic",
+			input: arabicDoc,
+			read:  pr.next,
+		},
+		{
+			name:  "emoji",
+			input: emojiDoc,
+			read:  pr.next,
+		},
+		{
+			name:  "complex",
+			input: complexDoc,
+			read:  pr.next,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pr.SetSource(tc.input)
+
+			runes := []rune{}
+			var paragraph []rune
+			ok := true
+			for ok {
+				paragraph, ok = tc.read()
+				if ok && len(paragraph) > 0 && paragraph[len(paragraph)-1] != '\n' {
+				}
+				for i, r := range paragraph {
+					if i == len(paragraph)-1 {
+						if r != '\n' && ok {
+							t.Error("non-final paragraph does not end with newline")
+						}
+					} else if r == '\n' {
+						t.Errorf("paragraph[%d] contains newline", i)
+					}
+				}
+				runes = append(runes, paragraph...)
+			}
+			tc.input.Seek(0, 0)
+			b, _ := io.ReadAll(tc.input)
+			asRunes := []rune(string(b))
+			if len(asRunes) != len(runes) {
+				t.Errorf("expected %d runes, got %d", len(asRunes), len(runes))
+			}
+			for i := 0; i < max(len(asRunes), len(runes)); i++ {
+				if i < min(len(asRunes), len(runes)) {
+					if runes[i] != asRunes[i] {
+						t.Errorf("expected runes[%d]=%d, got %d", i, asRunes[i], runes[i])
+					}
+				} else if i < len(asRunes) {
+					t.Errorf("expected runes[%d]=%d, got nothing", i, asRunes[i])
+				} else if i < len(runes) {
+					t.Errorf("expected runes[%d]=nothing, got %d", i, runes[i])
+				}
+			}
+		})
+	}
+}
+func TestGraphemeReaderGraphemes(t *testing.T) {
+	latinDoc := bytes.NewReader([]byte(latinDocument))
+	arabicDoc := bytes.NewReader([]byte(arabicDocument))
+	emojiDoc := bytes.NewReader([]byte(emojiDocument))
+	complexDoc := bytes.NewReader([]byte(complexDocument))
+	type testcase struct {
+		name  string
+		input *bytes.Reader
+		read  func() []int
+	}
+	var pr graphemeReader
+	for _, tc := range []testcase{
+		{
+			name:  "latin",
+			input: latinDoc,
+			read:  pr.Graphemes,
+		},
+		{
+			name:  "arabic",
+			input: arabicDoc,
+			read:  pr.Graphemes,
+		},
+		{
+			name:  "emoji",
+			input: emojiDoc,
+			read:  pr.Graphemes,
+		},
+		{
+			name:  "complex",
+			input: complexDoc,
+			read:  pr.Graphemes,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pr.SetSource(tc.input)
+
+			graphemes := []int{}
+			for g := tc.read(); len(g) > 0; g = tc.read() {
+				if len(graphemes) > 0 && g[0] != graphemes[len(graphemes)-1] {
+					t.Errorf("expected first boundary in new paragraph %d to match final boundary in previous %d", g[0], graphemes[len(graphemes)-1])
+				}
+				if len(graphemes) > 0 {
+					// Drop duplicated boundary.
+					g = g[1:]
+				}
+				graphemes = append(graphemes, g...)
+			}
+			tc.input.Seek(0, 0)
+			b, _ := io.ReadAll(tc.input)
+			asRunes := []rune(string(b))
+			if len(asRunes)+1 < len(graphemes) {
+				t.Errorf("expected <= %d graphemes, got %d", len(asRunes)+1, len(graphemes))
+			}
+			for i := 0; i < len(graphemes)-1; i++ {
+				if graphemes[i] >= graphemes[i+1] {
+					t.Errorf("graphemes[%d](%d) >= graphemes[%d](%d)", i, graphemes[i], i+1, graphemes[i+1])
+				}
+			}
+		})
+	}
+}
+func BenchmarkGraphemeReaderNext(b *testing.B) {
+	latinDoc := bytes.NewReader([]byte(latinDocument))
+	arabicDoc := bytes.NewReader([]byte(arabicDocument))
+	emojiDoc := bytes.NewReader([]byte(emojiDocument))
+	complexDoc := bytes.NewReader([]byte(complexDocument))
+	type testcase struct {
+		name  string
+		input *bytes.Reader
+		read  func() ([]rune, bool)
+	}
+	pr := &graphemeReader{}
+	for _, tc := range []testcase{
+		{
+			name:  "latin",
+			input: latinDoc,
+			read:  pr.next,
+		},
+		{
+			name:  "arabic",
+			input: arabicDoc,
+			read:  pr.next,
+		},
+		{
+			name:  "emoji",
+			input: emojiDoc,
+			read:  pr.next,
+		},
+		{
+			name:  "complex",
+			input: complexDoc,
+			read:  pr.next,
+		},
+	} {
+		var paragraph []rune = make([]rune, 4096)
+		b.Run(tc.name, func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				pr.SetSource(tc.input)
+
+				ok := true
+				for ok {
+					paragraph, ok = tc.read()
+					_ = paragraph
+				}
+				_ = paragraph
+			}
+		})
+	}
+}
+func BenchmarkGraphemeReaderGraphemes(b *testing.B) {
+	latinDoc := bytes.NewReader([]byte(latinDocument))
+	arabicDoc := bytes.NewReader([]byte(arabicDocument))
+	emojiDoc := bytes.NewReader([]byte(emojiDocument))
+	complexDoc := bytes.NewReader([]byte(complexDocument))
+	type testcase struct {
+		name  string
+		input *bytes.Reader
+		read  func() []int
+	}
+	pr := &graphemeReader{}
+	for _, tc := range []testcase{
+		{
+			name:  "latin",
+			input: latinDoc,
+			read:  pr.Graphemes,
+		},
+		{
+			name:  "arabic",
+			input: arabicDoc,
+			read:  pr.Graphemes,
+		},
+		{
+			name:  "emoji",
+			input: emojiDoc,
+			read:  pr.Graphemes,
+		},
+		{
+			name:  "complex",
+			input: complexDoc,
+			read:  pr.Graphemes,
+		},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				pr.SetSource(tc.input)
+				for g := tc.read(); len(g) > 0; g = tc.read() {
+					_ = g
+				}
+			}
+		})
 	}
 }

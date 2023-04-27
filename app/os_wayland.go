@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"image"
 	"io"
-	"io/ioutil"
 	"math"
 	"os"
 	"os/exec"
@@ -904,18 +903,7 @@ func gio_onPointerButton(data unsafe.Pointer, p *C.struct_wl_pointer, serial, t,
 	default:
 		return
 	}
-	var typ pointer.Type
-	switch state {
-	case 0:
-		w.pointerBtns &^= btn
-		typ = pointer.Release
-		// Move or resize gestures no longer applies.
-		w.inCompositor = false
-	case 1:
-		w.pointerBtns |= btn
-		typ = pointer.Press
-	}
-	if typ == pointer.Press && btn == pointer.ButtonPrimary {
+	if state == 1 && btn == pointer.ButtonPrimary {
 		if _, edge := w.systemGesture(); edge != 0 {
 			w.resize(serial, edge)
 			return
@@ -928,6 +916,17 @@ func gio_onPointerButton(data unsafe.Pointer, p *C.struct_wl_pointer, serial, t,
 				return
 			}
 		}
+	}
+	var typ pointer.Type
+	switch state {
+	case 0:
+		w.pointerBtns &^= btn
+		typ = pointer.Release
+		// Move or resize gestures no longer applies.
+		w.inCompositor = false
+	case 1:
+		w.pointerBtns |= btn
+		typ = pointer.Press
 	}
 	w.flushScroll()
 	w.resetFling()
@@ -1018,7 +1017,7 @@ func (w *window) ReadClipboard() {
 	// Don't let slow clipboard transfers block event loop.
 	go func() {
 		defer r.Close()
-		data, _ := ioutil.ReadAll(r)
+		data, _ := io.ReadAll(r)
 		w.clipReads <- clipboard.Event{Text: string(data)}
 		w.Wakeup()
 	}()

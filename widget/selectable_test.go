@@ -5,6 +5,7 @@ import (
 	"image"
 	"testing"
 
+	"gioui.org/font"
 	"gioui.org/font/gofont"
 	"gioui.org/io/key"
 	"gioui.org/layout"
@@ -37,7 +38,7 @@ func TestSelectableMove(t *testing.T) {
 		Locale: english,
 	}
 	cache := text.NewShaper(gofont.Collection())
-	font := text.Font{}
+	fnt := font.Font{}
 	fontSize := unit.Sp(10)
 
 	str := `0123456789`
@@ -46,10 +47,8 @@ func TestSelectableMove(t *testing.T) {
 	gtx.Queue = newQueue(key.FocusEvent{Focus: true})
 	s := new(Selectable)
 
-	w := func(layout.Context) layout.Dimensions { return layout.Dimensions{} }
-	Label{
-		Selectable: s,
-	}.LayoutSelectable(gtx, cache, text.Font{}, fontSize, str, w)
+	s.SetText(str)
+	s.Layout(gtx, cache, font.Font{}, fontSize, op.CallOp{}, op.CallOp{})
 
 	testKey := func(keyName string) {
 		// Select 345
@@ -63,9 +62,8 @@ func TestSelectableMove(t *testing.T) {
 
 		// Press the key
 		gtx.Queue = newQueue(key.Event{State: key.Press, Name: keyName})
-		Label{
-			Selectable: s,
-		}.LayoutSelectable(gtx, cache, font, fontSize, str, w)
+		s.SetText(str)
+		s.Layout(gtx, cache, fnt, fontSize, op.CallOp{}, op.CallOp{})
 
 		if expected, got := "", s.SelectedText(); expected != got {
 			t.Errorf("KeyName %s, expected %q, got %q", keyName, expected, got)
@@ -86,9 +84,8 @@ func TestSelectableConfigurations(t *testing.T) {
 	}
 	cache := text.NewShaper(gofont.Collection())
 	fontSize := unit.Sp(10)
-	font := text.Font{}
+	font := font.Font{}
 	sentence := "\n\n\n\n\n\n\n\n\n\n\n\nthe quick brown fox jumps over the lazy dog"
-	w := func(layout.Context) layout.Dimensions { return layout.Dimensions{} }
 
 	for _, alignment := range []text.Alignment{text.Start, text.Middle, text.End} {
 		for _, zeroMin := range []bool{true, false} {
@@ -104,12 +101,10 @@ func TestSelectableConfigurations(t *testing.T) {
 					gtx.Constraints.Min = gtx.Constraints.Max
 				}
 				s := new(Selectable)
-				label := Label{
-					Alignment:  alignment,
-					Selectable: s,
-				}
-				interactiveDims := label.LayoutSelectable(gtx, cache, font, fontSize, sentence, w)
-				staticDims := label.Layout(gtx, cache, font, fontSize, sentence)
+				s.Alignment = alignment
+				s.SetText(sentence)
+				interactiveDims := s.Layout(gtx, cache, font, fontSize, op.CallOp{}, op.CallOp{})
+				staticDims := Label{Alignment: alignment}.Layout(gtx, cache, font, fontSize, sentence, op.CallOp{})
 
 				if interactiveDims != staticDims {
 					t.Errorf("expected consistent dimensions, static returned %#+v, interactive returned %#+v", staticDims, interactiveDims)

@@ -9,7 +9,10 @@ import (
 	"testing"
 	"time"
 
+	colEmoji "eliasnaur.com/font/noto/emoji/color"
+	"gioui.org/font"
 	"gioui.org/font/gofont"
+	"gioui.org/font/opentype"
 	"gioui.org/gpu/headless"
 	"gioui.org/io/system"
 	"gioui.org/layout"
@@ -24,12 +27,24 @@ var (
 		"latin":   latinDocument,
 		"arabic":  arabicDocument,
 		"complex": complexDocument,
+		"emoji":   emojiDocument,
 	}
+	emojiFace = func() opentype.Face {
+		face, _ := opentype.Parse(colEmoji.TTF)
+		return face
+	}()
 	sizes      = []int{10, 100, 1000}
 	locales    = []system.Locale{arabic, english}
-	benchFonts = func() []text.FontFace {
-		gofonts := gofont.Collection()
-		return append(arabicCollection, gofonts...)
+	benchFonts = func() []font.FontFace {
+		collection := gofont.Collection()
+		collection = append(collection, arabicCollection...)
+		collection = append(collection, font.FontFace{
+			Font: font.Font{
+				Typeface: "Noto Color Emoji",
+			},
+			Face: emojiFace,
+		})
+		return collection
 	}()
 )
 
@@ -77,13 +92,13 @@ func BenchmarkLabelStatic(b *testing.B) {
 			defer win.Release()
 		}
 		fontSize := unit.Sp(10)
-		font := text.Font{}
+		font := font.Font{}
 		runes := []rune(txt)[:runeCount]
 		runesStr := string(runes)
 		l := Label{}
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			l.Layout(gtx, cache, font, fontSize, runesStr)
+			l.Layout(gtx, cache, font, fontSize, runesStr, op.CallOp{})
 			if render {
 				win.Frame(gtx.Ops)
 			}
@@ -109,7 +124,7 @@ func BenchmarkLabelDynamic(b *testing.B) {
 			defer win.Release()
 		}
 		fontSize := unit.Sp(10)
-		font := text.Font{}
+		font := font.Font{}
 		runes := []rune(txt)[:runeCount]
 		l := Label{}
 		b.ResetTimer()
@@ -118,7 +133,7 @@ func BenchmarkLabelDynamic(b *testing.B) {
 			a := rand.Intn(len(runes))
 			b := rand.Intn(len(runes))
 			runes[a], runes[b] = runes[b], runes[a]
-			l.Layout(gtx, cache, font, fontSize, string(runes))
+			l.Layout(gtx, cache, font, fontSize, string(runes), op.CallOp{})
 			if render {
 				win.Frame(gtx.Ops)
 			}
@@ -144,19 +159,14 @@ func BenchmarkEditorStatic(b *testing.B) {
 			defer win.Release()
 		}
 		fontSize := unit.Sp(10)
-		font := text.Font{}
+		font := font.Font{}
 		runes := []rune(txt)[:runeCount]
 		runesStr := string(runes)
 		e := Editor{}
 		e.SetText(runesStr)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			e.Layout(gtx, cache, font, fontSize, func(gtx layout.Context) layout.Dimensions {
-				e.PaintSelection(gtx)
-				e.PaintText(gtx)
-				e.PaintCaret(gtx)
-				return layout.Dimensions{Size: gtx.Constraints.Min}
-			})
+			e.Layout(gtx, cache, font, fontSize, op.CallOp{}, op.CallOp{})
 			if render {
 				win.Frame(gtx.Ops)
 			}
@@ -182,7 +192,7 @@ func BenchmarkEditorDynamic(b *testing.B) {
 			defer win.Release()
 		}
 		fontSize := unit.Sp(10)
-		font := text.Font{}
+		font := font.Font{}
 		runes := []rune(txt)[:runeCount]
 		e := Editor{}
 		e.SetText(string(runes))
@@ -196,12 +206,7 @@ func BenchmarkEditorDynamic(b *testing.B) {
 			e.Insert("")
 			e.SetCaret(b, b)
 			e.Insert(takeStr)
-			e.Layout(gtx, cache, font, fontSize, func(gtx layout.Context) layout.Dimensions {
-				e.PaintSelection(gtx)
-				e.PaintText(gtx)
-				e.PaintCaret(gtx)
-				return layout.Dimensions{Size: gtx.Constraints.Min}
-			})
+			e.Layout(gtx, cache, font, fontSize, op.CallOp{}, op.CallOp{})
 			if render {
 				win.Frame(gtx.Ops)
 			}
@@ -221,16 +226,11 @@ func FuzzEditorEditing(f *testing.F) {
 	}
 	cache := text.NewShaper(benchFonts)
 	fontSize := unit.Sp(10)
-	font := text.Font{}
+	font := font.Font{}
 	e := Editor{}
 	f.Fuzz(func(t *testing.T, txt string, replaceFrom, replaceTo int16) {
 		e.SetText(txt)
-		e.Layout(gtx, cache, font, fontSize, func(gtx layout.Context) layout.Dimensions {
-			e.PaintSelection(gtx)
-			e.PaintText(gtx)
-			e.PaintCaret(gtx)
-			return layout.Dimensions{Size: gtx.Constraints.Min}
-		})
+		e.Layout(gtx, cache, font, fontSize, op.CallOp{}, op.CallOp{})
 		// simulate a constantly changing string
 		if e.Len() > 0 {
 			a := int(replaceFrom) % e.Len()
@@ -241,12 +241,7 @@ func FuzzEditorEditing(f *testing.F) {
 			e.SetCaret(b, b)
 			e.Insert(takeStr)
 		}
-		e.Layout(gtx, cache, font, fontSize, func(gtx layout.Context) layout.Dimensions {
-			e.PaintSelection(gtx)
-			e.PaintText(gtx)
-			e.PaintCaret(gtx)
-			return layout.Dimensions{Size: gtx.Constraints.Min}
-		})
+		e.Layout(gtx, cache, font, fontSize, op.CallOp{}, op.CallOp{})
 		gtx.Ops.Reset()
 	})
 }
@@ -351,4 +346,11 @@ Velit ونظراً للالتزامات التي يفرضها ultrices.
 Nunc scelerisque viverra mauris in aliquam sem ر إما أن  ut.
 السعادة من أجل ما هو أكثر أهمية أو يتحمل الألم
 Convallis posuere morbi leo urna molestie at.`
+	emojiDocument = `📚🎶🐰🌷👹🌟 🔰🐲📑🍢🔎 👢💮👷👧💑🐪 📙📜🐎🏠🎠 👧🌼💛🎉💜🎍 🔜💷🐉👘🕟📗🍟 🎆🍚📹💄 🐾🎩💽👘 📒💕👅💽🐩 📷🌌🌚🎣📌. 🍈🍅🔖🍄 🍐🔈🍤🐽 🐹💘🍚👩📡 🎸🏠🔳🏩🌳💣 🔡🔠🕤🔔🎴📕 📼👝🎓🕗💸 📓🌽🍟💵🕗🌒🏉📨 🔀🏉🍴💘🍣💸 🔪🔻🕖🎰 🐲👮🔙🌇🐒🏇 🐝🌚🏫🔀👍 👾🎧🍋🍔👧 💣💞🐴👆🐢🏊📀 🕤🌃🍌🕛🔬. 🏃🍜🍔🐽🎁🏩🎰 📮🍄🐖💕👈 🔠🕡🐊💞🍬📳 🎤🌆🌛🐍🔳 🐄🔇🔱🌇📺👞 💌👍📳🎤🏂 👞🎉🍶📊🔶🌅🐭🕙 🍜📠🎴💒🔶 📀💂🌷👺👙.
+
+📥🕝🎎🐻💘🍇🔤 💠🎇📦👩🍁 👜🍏🔏👎 🔟🌹🌗🎬🔙 🐁📛🐝🐏🐣 🔃🗻🔎🌺👀 📰📮🏩👯🐳🍀🍇 🍨📵🌂📌 👌📐🏨🐉 🍏🍘🔟🎣🔏📠 👤📭🐱📣. 🕓👶🎳📭🔌📃🔧 📟🔰🌂🎈🔣 🔤👍🍤👔🐪 🔨🎼🎊🎪🕝🐬 📴🎶🔈🔐🔘 🐬🐯🕜🎎👴🎃 🎑🐾👏👇🔭 🐥🔙💦🔩🔮 👊🐶👗📕 🐎📹👠🍤 🔢💘📷🐷🐂 🐫💕🕕🍖🔆🎽 👼🎶🌸👻🔷🌰 🔔💉💱🔂👵🔑. 🌁🎪🎌🍘🍏 🌛🍂🔎🕃📧👻 🎍🌔🐦🐻 🔉🎌🌘💉👒 📙💠🔙📰 🌒👏💪🌇💈 🌌📯📂🌀🔁 🏧💷🍀🐐🏈 📢🌏🔷💭 👋🕓🌓🕛🏢👡👋 🍶🐂🍠🔟 👵🏇🔶🕜👎. 👹💉🔌🍳🕗 🐫🌈🔠🐀🎩🎽 👺🔣🔂👪👴🐚🕙 👀🕓🔱🌇 🎻🐘🔐🕕 🌉🔡🐊🍮 💫🎆🎹🐍🎯 🐑🐱🍠🕑🍒.
+
+🎳🐎🔹🎾🐹📖 📘🐒📷🕧🔛 🐾📺🎿🍖💂🕥 🍜🎷🍣👳 🕛📧💶🌑 🌀💣🎎🐛🎪🐒 🎇🌹👺🎆💄📚 🔓🍗📓🎂🌍🌘📢 🍩💞🏂💥🔹📇💴 🐇🕝💹🐣💔🎫 👐🍼🏰🎄🎨👚 👑🔗🍅🐈 🐰🐙🌻👹👆 👬🐧🍬🕡🐽💉 🌅🔉🎤🔁📨🔧🔀🍏 🎼🔛📉🌺. 👖🌔🍢🏂💯 🏁🐰🍉📬🍖 📨💜📮🔕🎣🔩 🔏🕀🏫🎳📵👭👟 💨💃📶🎃 📚🔇🍛👽🐍🐄 🔼👻🍮🍔🍨🏪🐺 📩📜🍨📖 🏢🎉🔢🌚🌀🔊💍 🐟🕚🔴🎿🍞 🌈📤👲🌿🌅🍲📛💍 🐦🔰🐗🐆🎻 👑🕐📔🎁🍙🔪🔭. 🎐🐵🎼🌒🎰🍳🎽 🐻🔉💺🕁🍷 🐛🍬💦📶🔖 🔕🌳💃🌺🔢 💒📒🔘🐸👩 🌺🍈🌀🏁🎢🔖 📈🎸🐖👪 🐅🏁🔹🎬🍖📊🗼 🎬📅💝📀🎐. 🌗📍👇🎠 🌸🐸🐐🍕🐋 💈🌌🐶💤🌻🐞 🍯🌳📌🍮🐻🍝 🕦📯🔱👒 💖🌱🐨🎰🏭🏈 🔳🏩🌟🔭📢📒 🔅💬💓💻💁💂 🔗🍂🏇🌒🌂💩🕢 🔙🌆💞📜🔘👇 🍎🌃🔢🌵🏬 🔄💢🍨📋💇🌄 🍝🍧💂🏮🏁. 🎬🐽🔇🎣🌜🔣 🌍🔒👿🎆🌞🍇🍸 👖🍘🏡🕣 📝🐖💆🎈 👙🔳👙🔩👀🔂 🐤📈💃👗🔌🎾🔭🍴 🌺👛🌵🌕🐺 🎆💼👌👘🍈👛 🎳🐪🕧🏄 💯🍟💂👖🎍 🕀💟🌷💕🐉🐲🎷. 🎍👂📓🌽 🐉🕕🐤🌲📟🔂💷 🎑📛🕠🔹🐚 🍆📹🐚🐵🏇🏢 🍠💱🕦💙🏢🐌🎎 🐄🍨📄🌾🎻🏈 🏇🍪💸🔆💍📢👢 💇🌋👝🕜🌍🐶🎓 🍪📄🐤🎃💖 🔲🕒🍧🌎🐪🌶 🍓👲🔭🍯🌔👌 🔼🐗🗼🍂 🔶🍯🎶🐅🐂💗🐴🐶 📭📰📔👬🏯🕟🐄🍊 💆👞📆🐶🌖🎁👺 🐃💺👊🌿🎌.
+
+🍧🕔👆🔭🕛👇 🐆🔖🎂🐭📗🗼🐐 🌐🎢🌞💛🐚 🌿🎶💎💬🔩 💾🔐🎷🍙🐬🕐 🌏🍄🎾🐎🌽🍓🐳 💥🍎👳📫🐤📼🎾 👨🕃🕞🍯🍲. 💥🎍🔉🎈👻🔵🏬🔸 🔼🍹🔱🔮🕔 🌈💎👜📠 👢🍻🍢🎃👺🌍👰 🍵👃🕠🍎🍑 📜💥📘📌 🔹🔵🍷👅💏 💮💘🐜📠👬📖 🌅🍺🔇🌈👒🔀 🎢🌆💌🍬📱🎰 🌺🍆🔰🏁🍁🎠 🔇🔁🌹🔞🎀🎬🐭🌹 🏬📫🗾🎻📌. 🐠🏣👋👊🐟 👲🔣💻👅🎎 🎇🌲🕑🍨📯 🐜📵💙📷🎒🕔 🎇🏀🔴🐑🌗 🎧🔡👅🕁🏉👛🐬 🕧🐞🎩📓🍆📪 🐼📻👼🌄 🌟🌺🏦🍧🍕🐯 🕕🕦🐤💆🍧💩 🐑📜👏👐🐧🍞👵 👞🌲🍼🔍 🌛🐔🌄🎸🐯.`
 )

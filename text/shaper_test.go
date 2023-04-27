@@ -25,29 +25,126 @@ func TestWrappingTruncation(t *testing.T) {
 	cache.LayoutString(Parameters{
 		Alignment: Middle,
 		PxPerEm:   fixed.I(10),
-	}, 200, 200, english, textInput)
+		MinWidth:  200,
+		MaxWidth:  200,
+		Locale:    english,
+	}, textInput)
 	untruncatedCount := len(cache.txt.lines)
 
 	for i := untruncatedCount + 1; i > 0; i-- {
-		cache.LayoutString(Parameters{
-			Alignment: Middle,
-			PxPerEm:   fixed.I(10),
-			MaxLines:  i,
-		}, 200, 200, english, textInput)
-		lineCount := len(cache.txt.lines)
-		glyphs := []Glyph{}
-		for g, ok := cache.NextGlyph(); ok; g, ok = cache.NextGlyph() {
-			glyphs = append(glyphs, g)
-		}
-		if i <= untruncatedCount {
-			if lineCount != i {
-				t.Errorf("expected %d lines, got %d", i, lineCount)
+		t.Run(fmt.Sprintf("truncated to %d/%d lines", i, untruncatedCount), func(t *testing.T) {
+			cache.LayoutString(Parameters{
+				Alignment: Middle,
+				PxPerEm:   fixed.I(10),
+				MaxLines:  i,
+				MinWidth:  200,
+				MaxWidth:  200,
+				Locale:    english,
+			}, textInput)
+			lineCount := 0
+			lastGlyphWasLineBreak := false
+			glyphs := []Glyph{}
+			untruncatedRunes := 0
+			truncatedRunes := 0
+			for g, ok := cache.NextGlyph(); ok; g, ok = cache.NextGlyph() {
+				glyphs = append(glyphs, g)
+				if g.Flags&FlagTruncator != 0 && g.Flags&FlagClusterBreak != 0 {
+					truncatedRunes += g.Runes
+				} else {
+					untruncatedRunes += g.Runes
+				}
+				if g.Flags&FlagLineBreak != 0 {
+					lineCount++
+					lastGlyphWasLineBreak = true
+				} else {
+					lastGlyphWasLineBreak = false
+				}
 			}
-		} else if i > untruncatedCount {
-			if lineCount != untruncatedCount {
-				t.Errorf("expected %d lines, got %d", untruncatedCount, lineCount)
+			if lastGlyphWasLineBreak && truncatedRunes == 0 {
+				// There was no actual line of text following this break.
+				lineCount--
 			}
-		}
+			if i <= untruncatedCount {
+				if lineCount != i {
+					t.Errorf("expected %d lines, got %d", i, lineCount)
+				}
+			} else if i > untruncatedCount {
+				if lineCount != untruncatedCount {
+					t.Errorf("expected %d lines, got %d", untruncatedCount, lineCount)
+				}
+			}
+			if expected := len([]rune(textInput)); truncatedRunes+untruncatedRunes != expected {
+				t.Errorf("expected %d total runes, got %d (%d truncated)", expected, truncatedRunes+untruncatedRunes, truncatedRunes)
+			}
+		})
+	}
+}
+
+// TestWrappingForcedTruncation checks that the line wrapper's truncation features
+// activate correctly on multi-paragraph text when later paragraphs are truncated.
+func TestWrappingForcedTruncation(t *testing.T) {
+	// Use a test string containing multiple newlines to ensure that they are shaped
+	// as separate paragraphs.
+	textInput := "Lorem ipsum\ndolor sit\namet"
+	ltrFace, _ := opentype.Parse(goregular.TTF)
+	collection := []FontFace{{Face: ltrFace}}
+	cache := NewShaper(collection)
+	cache.LayoutString(Parameters{
+		Alignment: Middle,
+		PxPerEm:   fixed.I(10),
+		MinWidth:  200,
+		MaxWidth:  200,
+		Locale:    english,
+	}, textInput)
+	untruncatedCount := len(cache.txt.lines)
+
+	for i := untruncatedCount + 1; i > 0; i-- {
+		t.Run(fmt.Sprintf("truncated to %d/%d lines", i, untruncatedCount), func(t *testing.T) {
+			cache.LayoutString(Parameters{
+				Alignment: Middle,
+				PxPerEm:   fixed.I(10),
+				MaxLines:  i,
+				MinWidth:  200,
+				MaxWidth:  200,
+				Locale:    english,
+			}, textInput)
+			lineCount := 0
+			glyphs := []Glyph{}
+			untruncatedRunes := 0
+			truncatedRunes := 0
+			for g, ok := cache.NextGlyph(); ok; g, ok = cache.NextGlyph() {
+				glyphs = append(glyphs, g)
+				if g.Flags&FlagTruncator != 0 && g.Flags&FlagClusterBreak != 0 {
+					truncatedRunes += g.Runes
+				} else {
+					untruncatedRunes += g.Runes
+				}
+				if g.Flags&FlagLineBreak != 0 {
+					lineCount++
+				}
+			}
+			expectedTruncated := false
+			expectedLines := 0
+			if i < untruncatedCount {
+				expectedLines = i
+				expectedTruncated = true
+			} else if i == untruncatedCount {
+				expectedLines = i
+				expectedTruncated = false
+			} else if i > untruncatedCount {
+				expectedLines = untruncatedCount
+				expectedTruncated = false
+			}
+			if lineCount != expectedLines {
+				t.Errorf("expected %d lines, got %d", expectedLines, lineCount)
+			}
+			if truncatedRunes > 0 != expectedTruncated {
+				t.Errorf("expected expectedTruncated=%v, truncatedRunes=%d", expectedTruncated, truncatedRunes)
+			}
+			if expected := len([]rune(textInput)); truncatedRunes+untruncatedRunes != expected {
+				t.Errorf("expected %d total runes, got %d (%d truncated)", expected, truncatedRunes+untruncatedRunes, truncatedRunes)
+			}
+		})
 	}
 }
 
@@ -107,7 +204,10 @@ func TestShapingNewlineHandling(t *testing.T) {
 			cache.LayoutString(Parameters{
 				Alignment: Middle,
 				PxPerEm:   fixed.I(10),
-			}, 200, 200, english, tc.textInput)
+				MinWidth:  200,
+				MaxWidth:  200,
+				Locale:    english,
+			}, tc.textInput)
 			if lineCount := len(cache.txt.lines); lineCount > tc.expectedLines {
 				t.Errorf("shaping string %q created %d lines", tc.textInput, lineCount)
 			}
@@ -116,7 +216,10 @@ func TestShapingNewlineHandling(t *testing.T) {
 			cache.Layout(Parameters{
 				Alignment: Middle,
 				PxPerEm:   fixed.I(10),
-			}, 200, 200, english, strings.NewReader(tc.textInput))
+				MinWidth:  200,
+				MaxWidth:  200,
+				Locale:    english,
+			}, strings.NewReader(tc.textInput))
 			if lineCount := len(cache.txt.lines); lineCount > tc.expectedLines {
 				t.Errorf("shaping reader %q created %d lines", tc.textInput, lineCount)
 			}
@@ -134,7 +237,10 @@ func TestCacheEmptyString(t *testing.T) {
 	cache.LayoutString(Parameters{
 		Alignment: Middle,
 		PxPerEm:   fixed.I(10),
-	}, 200, 200, english, "")
+		MinWidth:  200,
+		MaxWidth:  200,
+		Locale:    english,
+	}, "")
 	glyphs := make([]Glyph, 0, 1)
 	for g, ok := cache.NextGlyph(); ok; g, ok = cache.NextGlyph() {
 		glyphs = append(glyphs, g)
@@ -167,31 +273,38 @@ func TestCacheAlignment(t *testing.T) {
 	ltrFace, _ := opentype.Parse(goregular.TTF)
 	collection := []FontFace{{Face: ltrFace}}
 	cache := NewShaper(collection)
-	params := Parameters{Alignment: Start, PxPerEm: fixed.I(10)}
-	cache.LayoutString(params, 200, 200, english, "A")
+	params := Parameters{
+		Alignment: Start,
+		PxPerEm:   fixed.I(10),
+		MinWidth:  200,
+		MaxWidth:  200,
+		Locale:    english,
+	}
+	cache.LayoutString(params, "A")
 	glyph, _ := cache.NextGlyph()
 	startX := glyph.X
 	params.Alignment = Middle
-	cache.LayoutString(params, 200, 200, english, "A")
+	cache.LayoutString(params, "A")
 	glyph, _ = cache.NextGlyph()
 	middleX := glyph.X
 	params.Alignment = End
-	cache.LayoutString(params, 200, 200, english, "A")
+	cache.LayoutString(params, "A")
 	glyph, _ = cache.NextGlyph()
 	endX := glyph.X
 	if startX == middleX || startX == endX || endX == middleX {
 		t.Errorf("[LTR] shaping with with different alignments should not produce the same X, start %d, middle %d, end %d", startX, middleX, endX)
 	}
+	params.Locale = arabic
 	params.Alignment = Start
-	cache.LayoutString(params, 200, 200, arabic, "A")
+	cache.LayoutString(params, "A")
 	glyph, _ = cache.NextGlyph()
 	rtlStartX := glyph.X
 	params.Alignment = Middle
-	cache.LayoutString(params, 200, 200, arabic, "A")
+	cache.LayoutString(params, "A")
 	glyph, _ = cache.NextGlyph()
 	rtlMiddleX := glyph.X
 	params.Alignment = End
-	cache.LayoutString(params, 200, 200, arabic, "A")
+	cache.LayoutString(params, "A")
 	glyph, _ = cache.NextGlyph()
 	rtlEndX := glyph.X
 	if rtlStartX == rtlMiddleX || rtlStartX == rtlEndX || rtlEndX == rtlMiddleX {
@@ -227,8 +340,10 @@ func TestCacheGlyphConverstion(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cache := NewShaper(collection)
 			cache.LayoutString(Parameters{
-				PxPerEm: fixed.I(10),
-			}, 0, 200, tc.locale, tc.text)
+				PxPerEm:  fixed.I(10),
+				MaxWidth: 200,
+				Locale:   tc.locale,
+			}, tc.text)
 			doc := cache.txt
 			glyphs := make([]Glyph, 0, len(tc.expected))
 			for g, ok := cache.NextGlyph(); ok; g, ok = cache.NextGlyph() {
