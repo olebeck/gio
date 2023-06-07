@@ -416,7 +416,7 @@ func (s *shaperImpl) shapeAndWrapText(faces []font.Face, params Parameters, txt 
 		wc.Truncator = s.shapeText(faces, params.PxPerEm, params.Locale, []rune(params.Truncator))[0]
 	}
 	// Wrap outputs into lines.
-	return s.wrapper.WrapParagraph(wc, params.MaxWidth, txt, s.shapeText(faces, params.PxPerEm, params.Locale, txt)...)
+	return s.wrapper.WrapParagraph(wc, params.MaxWidth, txt, shaping.NewSliceIterator(s.shapeText(faces, params.PxPerEm, params.Locale, txt)))
 }
 
 // replaceControlCharacters replaces problematic unicode
