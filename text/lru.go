@@ -159,6 +159,9 @@ type layoutKey struct {
 	locale             system.Locale
 	font               giofont.Font
 	forceTruncate      bool
+	wrapPolicy         WrapPolicy
+	lineHeight         fixed.Int26_6
+	lineHeightScale    float32
 }
 
 type pathKey struct {

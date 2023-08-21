@@ -16,6 +16,27 @@ import (
 	"golang.org/x/image/math/fixed"
 )
 
+// WrapPolicy configures strategies for choosing where to break lines of text for line
+// wrapping.
+type WrapPolicy uint8
+
+const (
+	// WrapHeuristically tries to minimize breaking within words (UAX#14 text segments)
+	// while also ensuring that text fits within the given MaxWidth. It will only break
+	// a line within a word (on a UAX#29 grapheme cluster boundary) when that word cannot
+	// fit on a line by itself. Additionally, when the final word of a line is being
+	// truncated, this policy will preserve as many symbols of that word as
+	// possible before the truncator.
+	WrapHeuristically WrapPolicy = iota
+	// WrapWords does not permit words (UAX#14 text segments) to be broken across lines.
+	// This means that sometimes long words will exceed the MaxWidth they are wrapped with.
+	WrapWords
+	// WrapGraphemes will maximize the amount of text on each line at the expense of readability,
+	// breaking any word across lines on UAX#29 grapheme cluster boundaries to maximize the number of
+	// grapheme clusters on each line.
+	WrapGraphemes
+)
+
 // Parameters are static text shaping attributes applied to the entire shaped text.
 type Parameters struct {
 	// Font describes the preferred typeface.
@@ -32,11 +53,24 @@ type Parameters struct {
 	// truncated.
 	Truncator string
 
+	// WrapPolicy configures how line breaks will be chosen when wrapping text across lines.
+	WrapPolicy WrapPolicy
+
 	// MinWidth and MaxWidth provide the minimum and maximum horizontal space constraints
 	// for the shaped text.
 	MinWidth, MaxWidth int
 	// Locale provides primary direction and language information for the shaped text.
 	Locale system.Locale
+
+	// LineHeightScale is a scaling factor applied to the LineHeight of a paragraph. If zero, a default
+	// value of 1.2 will be used.
+	LineHeightScale float32
+
+	// LineHeight is the distance between the baselines of two lines of text. If zero, the PxPerEm
+	// of the any given paragraph will set the LineHeight of that paragraph. This value will be
+	// scaled by LineHeightScale, so applications desiring a specific fixed value
+	// should set LineHeightScale to 1.
+	LineHeight fixed.Int26_6
 
 	// forceTruncate controls whether the truncator string is inserted on the final line of
 	// text with a MaxLines. It is unexported because this behavior only makes sense for the
@@ -167,6 +201,11 @@ type GlyphID uint64
 
 // Shaper converts strings of text into glyphs that can be displayed.
 type Shaper struct {
+	config struct {
+		disableSystemFonts bool
+		collection         []FontFace
+	}
+	initialized      bool
 	shaper           shaperImpl
 	pathCache        pathCache
 	bitmapShapeCache bitmapShapeCache
@@ -189,26 +228,56 @@ type Shaper struct {
 	err  error
 }
 
-// NewShaper constructs a shaper with the provided collection of font faces
-// available.
-func NewShaper(collection []FontFace) *Shaper {
-	l := &Shaper{}
-	for _, f := range collection {
-		l.shaper.Load(f)
+// ShaperOptions configure text shapers.
+type ShaperOption func(*Shaper)
+
+// NoSystemFonts can be used to disable system font loading.
+func NoSystemFonts() ShaperOption {
+	return func(s *Shaper) {
+		s.config.disableSystemFonts = true
 	}
-	l.shaper.shaper.SetFontCacheSize(32)
-	l.reader = bufio.NewReader(nil)
+}
+
+// WithCollection can be used to provide a collection of pre-loaded fonts to the shaper.
+func WithCollection(collection []FontFace) ShaperOption {
+	return func(s *Shaper) {
+		s.config.collection = collection
+	}
+}
+
+// NewShaper constructs a shaper with the provided options.
+//
+// NewShaper must be called after [app.NewWindow], unless the [NoSystemFonts]
+// option is specified. This is an unfortunate restriction caused by some platforms
+// such as Android.
+func NewShaper(options ...ShaperOption) *Shaper {
+	l := &Shaper{}
+	for _, opt := range options {
+		opt(l)
+	}
+	l.init()
 	return l
+}
+
+func (l *Shaper) init() {
+	if l.initialized {
+		return
+	}
+	l.initialized = true
+	l.reader = bufio.NewReader(nil)
+	l.shaper = *newShaperImpl(!l.config.disableSystemFonts, l.config.collection)
 }
 
 // Layout text from an io.Reader according to a set of options. Results can be retrieved by
 // iteratively calling NextGlyph.
 func (l *Shaper) Layout(params Parameters, txt io.Reader) {
+	l.init()
 	l.layoutText(params, txt, "")
 }
 
 // LayoutString is Layout for strings.
 func (l *Shaper) LayoutString(params Parameters, str string) {
+	l.init()
 	l.layoutText(params, nil, str)
 }
 
@@ -250,7 +319,9 @@ func (l *Shaper) layoutText(params Parameters, txt io.Reader, str string) {
 			if !done {
 				_, re := l.reader.ReadByte()
 				done = re != nil
-				_ = l.reader.UnreadByte()
+				if !done {
+					_ = l.reader.UnreadByte()
+				}
 			}
 		} else {
 			idx := strings.IndexByte(str, '\n')
@@ -259,6 +330,7 @@ func (l *Shaper) layoutText(params Parameters, txt io.Reader, str string) {
 				endByte = len(str)
 			} else {
 				endByte = idx + 1
+				done = endByte == len(str)
 			}
 		}
 		if len(str[:endByte]) > 0 || (len(l.paragraph) > 0 || len(l.txt.lines) == 0) {
@@ -310,15 +382,18 @@ func (l *Shaper) layoutParagraph(params Parameters, asStr string, asBytes []byte
 	}
 	// Alignment is not part of the cache key because changing it does not impact shaping.
 	lk := layoutKey{
-		ppem:          params.PxPerEm,
-		maxWidth:      params.MaxWidth,
-		minWidth:      params.MinWidth,
-		maxLines:      params.MaxLines,
-		truncator:     params.Truncator,
-		locale:        params.Locale,
-		font:          params.Font,
-		forceTruncate: params.forceTruncate,
-		str:           asStr,
+		ppem:            params.PxPerEm,
+		maxWidth:        params.MaxWidth,
+		minWidth:        params.MinWidth,
+		maxLines:        params.MaxLines,
+		truncator:       params.Truncator,
+		locale:          params.Locale,
+		font:            params.Font,
+		forceTruncate:   params.forceTruncate,
+		wrapPolicy:      params.WrapPolicy,
+		str:             asStr,
+		lineHeight:      params.LineHeight,
+		lineHeightScale: params.LineHeightScale,
 	}
 	if l, ok := l.layoutCache.Get(lk); ok {
 		return l
@@ -331,6 +406,7 @@ func (l *Shaper) layoutParagraph(params Parameters, asStr string, asBytes []byte
 // NextGlyph returns the next glyph from the most recent shaping operation, if
 // any. If there are no more glyphs, ok will be false.
 func (l *Shaper) NextGlyph() (_ Glyph, ok bool) {
+	l.init()
 	if l.done {
 		return Glyph{}, false
 	}
@@ -498,6 +574,7 @@ func splitGlyphID(g GlyphID) (fixed.Int26_6, int, font.GID) {
 // of all vector glyphs.
 // All glyphs are expected to be from a single line of text (their Y offsets are ignored).
 func (l *Shaper) Shape(gs []Glyph) clip.PathSpec {
+	l.init()
 	key := l.pathCache.hashGlyphs(gs)
 	shape, ok := l.pathCache.Get(key, gs)
 	if ok {
@@ -514,6 +591,7 @@ func (l *Shaper) Shape(gs []Glyph) clip.PathSpec {
 // same gs slice.
 // All glyphs are expected to be from a single line of text (their Y offsets are ignored).
 func (l *Shaper) Bitmaps(gs []Glyph) op.CallOp {
+	l.init()
 	key := l.bitmapShapeCache.hashGlyphs(gs)
 	call, ok := l.bitmapShapeCache.Get(key, gs)
 	if ok {

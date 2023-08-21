@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	nsareg "eliasnaur.com/font/noto/sans/arabic/regular"
+	"gioui.org/font"
 	"gioui.org/font/gofont"
 	"gioui.org/font/opentype"
 	"gioui.org/io/system"
@@ -22,7 +23,7 @@ func TestWrappingTruncation(t *testing.T) {
 	textInput := "Lorem ipsum dolor sit amet, consectetur adipiscing elit,\nsed do eiusmod tempor incididunt ut labore et\ndolore magna aliqua.\n"
 	ltrFace, _ := opentype.Parse(goregular.TTF)
 	collection := []FontFace{{Face: ltrFace}}
-	cache := NewShaper(collection)
+	cache := NewShaper(NoSystemFonts(), WithCollection(collection))
 	cache.LayoutString(Parameters{
 		Alignment: Middle,
 		PxPerEm:   fixed.I(10),
@@ -89,7 +90,7 @@ func TestWrappingForcedTruncation(t *testing.T) {
 	textInput := "Lorem ipsum\ndolor sit\namet"
 	ltrFace, _ := opentype.Parse(goregular.TTF)
 	collection := []FontFace{{Face: ltrFace}}
-	cache := NewShaper(collection)
+	cache := NewShaper(NoSystemFonts(), WithCollection(collection))
 	cache.LayoutString(Parameters{
 		Alignment: Middle,
 		PxPerEm:   fixed.I(10),
@@ -161,15 +162,23 @@ func TestShapingNewlineHandling(t *testing.T) {
 		{textInput: "a\n", expectedLines: 1, expectedGlyphs: 3},
 		{textInput: "a\nb", expectedLines: 2, expectedGlyphs: 3},
 		{textInput: "", expectedLines: 1, expectedGlyphs: 1},
+		{textInput: "\n", expectedLines: 1, expectedGlyphs: 2},
+		{textInput: "\n\n", expectedLines: 2, expectedGlyphs: 3},
+		{textInput: "\n\n\n", expectedLines: 3, expectedGlyphs: 4},
 	} {
 		t.Run(fmt.Sprintf("%q", tc.textInput), func(t *testing.T) {
 			ltrFace, _ := opentype.Parse(goregular.TTF)
 			collection := []FontFace{{Face: ltrFace}}
-			cache := NewShaper(collection)
+			cache := NewShaper(NoSystemFonts(), WithCollection(collection))
 			checkGlyphs := func() {
 				glyphs := []Glyph{}
+				runes := 0
 				for g, ok := cache.NextGlyph(); ok; g, ok = cache.NextGlyph() {
 					glyphs = append(glyphs, g)
+					runes += g.Runes
+				}
+				if expected := len([]rune(tc.textInput)); expected != runes {
+					t.Errorf("expected %d runes, got %d", expected, runes)
 				}
 				if len(glyphs) != tc.expectedGlyphs {
 					t.Errorf("expected %d glyphs, got %d", tc.expectedGlyphs, len(glyphs))
@@ -191,8 +200,8 @@ func TestShapingNewlineHandling(t *testing.T) {
 					}
 					breakX, breakY := breakGlyph.X, breakGlyph.Y
 					startX, startY := startGlyph.X, startGlyph.Y
-					if breakX == startX {
-						t.Errorf("expected paragraph start glyph to have cursor x")
+					if breakX == startX && idx != 0 {
+						t.Errorf("expected paragraph start glyph to have cursor x, got %v", startX)
 					}
 					if breakY == startY {
 						t.Errorf("expected paragraph start glyph to have cursor y")
@@ -234,7 +243,7 @@ func TestShapingNewlineHandling(t *testing.T) {
 func TestCacheEmptyString(t *testing.T) {
 	ltrFace, _ := opentype.Parse(goregular.TTF)
 	collection := []FontFace{{Face: ltrFace}}
-	cache := NewShaper(collection)
+	cache := NewShaper(NoSystemFonts(), WithCollection(collection))
 	cache.LayoutString(Parameters{
 		Alignment: Middle,
 		PxPerEm:   fixed.I(10),
@@ -273,7 +282,7 @@ func TestCacheEmptyString(t *testing.T) {
 func TestCacheAlignment(t *testing.T) {
 	ltrFace, _ := opentype.Parse(goregular.TTF)
 	collection := []FontFace{{Face: ltrFace}}
-	cache := NewShaper(collection)
+	cache := NewShaper(NoSystemFonts(), WithCollection(collection))
 	params := Parameters{
 		Alignment: Start,
 		PxPerEm:   fixed.I(10),
@@ -339,7 +348,7 @@ func TestCacheGlyphConverstion(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cache := NewShaper(collection)
+			cache := NewShaper(NoSystemFonts(), WithCollection(collection))
 			cache.LayoutString(Parameters{
 				PxPerEm:  fixed.I(10),
 				MaxWidth: 200,
@@ -464,6 +473,58 @@ func TestShapeStringRuneAccounting(t *testing.T) {
 				MaxWidth: 100,
 			},
 		},
+		{
+			name:  "newline regression",
+			input: "\n",
+			params: Parameters{
+				Font:       font.Font{Typeface: "Go", Style: font.Regular, Weight: font.Normal},
+				Alignment:  Start,
+				PxPerEm:    768,
+				MaxLines:   1,
+				Truncator:  "\u200b",
+				WrapPolicy: WrapHeuristically,
+				MaxWidth:   999929,
+			},
+		},
+		{
+			name:  "newline zero-width regression",
+			input: "\n",
+			params: Parameters{
+				Font:       font.Font{Typeface: "Go", Style: font.Regular, Weight: font.Normal},
+				Alignment:  Start,
+				PxPerEm:    768,
+				MaxLines:   1,
+				Truncator:  "\u200b",
+				WrapPolicy: WrapHeuristically,
+				MaxWidth:   0,
+			},
+		},
+		{
+			name:  "double newline regression",
+			input: "\n\n",
+			params: Parameters{
+				Font:       font.Font{Typeface: "Go", Style: font.Regular, Weight: font.Normal},
+				Alignment:  Start,
+				PxPerEm:    768,
+				MaxLines:   1,
+				Truncator:  "\u200b",
+				WrapPolicy: WrapHeuristically,
+				MaxWidth:   1000,
+			},
+		},
+		{
+			name:  "triple newline regression",
+			input: "\n\n\n",
+			params: Parameters{
+				Font:       font.Font{Typeface: "Go", Style: font.Regular, Weight: font.Normal},
+				Alignment:  Start,
+				PxPerEm:    768,
+				MaxLines:   1,
+				Truncator:  "\u200b",
+				WrapPolicy: WrapHeuristically,
+				MaxWidth:   1000,
+			},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, setup := range []setup{
@@ -481,7 +542,7 @@ func TestShapeStringRuneAccounting(t *testing.T) {
 				},
 			} {
 				t.Run(setup.kind, func(t *testing.T) {
-					shaper := NewShaper(gofont.Collection())
+					shaper := NewShaper(NoSystemFonts(), WithCollection(gofont.Collection()))
 					setup.do(shaper, tc.params, tc.input)
 
 					glyphs := []Glyph{}

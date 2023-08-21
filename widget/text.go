@@ -44,6 +44,12 @@ type textSource interface {
 // be scrolled, and for configuring and drawing text selection boxes.
 type textView struct {
 	Alignment text.Alignment
+	// LineHeight controls the distance between the baselines of lines of text.
+	// If zero, a sensible default will be used.
+	LineHeight unit.Sp
+	// LineHeightScale applies a scaling factor to the LineHeight. If zero, a
+	// sensible default will be used.
+	LineHeightScale float32
 	// SingleLine forces the text to stay on a single line.
 	// SingleLine also sets the scrolling direction to
 	// horizontal.
@@ -53,6 +59,8 @@ type textView struct {
 	// Truncator is the text that will be shown at the end of the final
 	// line if MaxLines is exceeded. Defaults to "…" if empty.
 	Truncator string
+	// WrapPolicy configures how displayed text will be broken into lines.
+	WrapPolicy text.WrapPolicy
 	// Mask replaces the visual display of each rune in the contents with the given rune.
 	// Newline characters are not masked. When non-zero, the unmasked contents
 	// are accessed by Len, Text, and SetText.
@@ -265,6 +273,18 @@ func (e *textView) Update(gtx layout.Context, lt *text.Shaper, font font.Font, s
 	}
 	if e.MaxLines != e.params.MaxLines {
 		e.params.MaxLines = e.MaxLines
+		e.invalidate()
+	}
+	if e.WrapPolicy != e.params.WrapPolicy {
+		e.params.WrapPolicy = e.WrapPolicy
+		e.invalidate()
+	}
+	if lh := fixed.I(gtx.Sp(e.LineHeight)); lh != e.params.LineHeight {
+		e.params.LineHeight = lh
+		e.invalidate()
+	}
+	if e.LineHeightScale != e.params.LineHeightScale {
+		e.params.LineHeightScale = e.LineHeightScale
 		e.invalidate()
 	}
 

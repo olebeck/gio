@@ -108,7 +108,7 @@ func TestEditorReadOnly(t *testing.T) {
 			key.FocusEvent{Focus: true},
 		},
 	}
-	cache := text.NewShaper(gofont.Collection())
+	cache := text.NewShaper(text.NoSystemFonts(), text.WithCollection(gofont.Collection()))
 	fontSize := unit.Sp(10)
 	font := font.Font{}
 	e := new(Editor)
@@ -187,7 +187,7 @@ func TestEditorConfigurations(t *testing.T) {
 		Constraints: layout.Exact(image.Pt(300, 300)),
 		Locale:      english,
 	}
-	cache := text.NewShaper(gofont.Collection())
+	cache := text.NewShaper(text.NoSystemFonts(), text.WithCollection(gofont.Collection()))
 	fontSize := unit.Sp(10)
 	font := font.Font{}
 	sentence := "\n\n\n\n\n\n\n\n\n\n\n\nthe quick brown fox jumps over the lazy dog"
@@ -241,7 +241,7 @@ func TestEditor(t *testing.T) {
 		Constraints: layout.Exact(image.Pt(100, 100)),
 		Locale:      english,
 	}
-	cache := text.NewShaper(gofont.Collection())
+	cache := text.NewShaper(text.NoSystemFonts(), text.WithCollection(gofont.Collection()))
 	fontSize := unit.Sp(10)
 	font := font.Font{}
 
@@ -349,7 +349,7 @@ func TestEditorRTL(t *testing.T) {
 		Constraints: layout.Exact(image.Pt(100, 100)),
 		Locale:      arabic,
 	}
-	cache := text.NewShaper(arabicCollection)
+	cache := text.NewShaper(text.NoSystemFonts(), text.WithCollection(arabicCollection))
 	fontSize := unit.Sp(10)
 	font := font.Font{}
 
@@ -409,6 +409,7 @@ func TestEditorRTL(t *testing.T) {
 
 func TestEditorLigature(t *testing.T) {
 	e := new(Editor)
+	e.WrapPolicy = text.WrapWords
 	gtx := layout.Context{
 		Ops:         new(op.Ops),
 		Constraints: layout.Exact(image.Pt(100, 100)),
@@ -418,14 +419,14 @@ func TestEditorLigature(t *testing.T) {
 	if err != nil {
 		t.Skipf("failed parsing test font: %v", err)
 	}
-	cache := text.NewShaper([]font.FontFace{
+	cache := text.NewShaper(text.NoSystemFonts(), text.WithCollection([]font.FontFace{
 		{
 			Font: font.Font{
 				Typeface: "Roboto",
 			},
 			Face: face,
 		},
-	})
+	}))
 	fontSize := unit.Sp(10)
 	font := font.Font{}
 
@@ -507,13 +508,14 @@ func TestEditorLigature(t *testing.T) {
 	// Ensure that all runes in the final cluster of a line are properly
 	// decoded when moving to the end of the line. This is a regression test.
 	e.text.MoveEnd(selectionClear)
-	// The first line was broken by line wrapping, not a newline character. As such,
-	// the cursor can reach the position after the final glyph (a space).
-	assertCaret(t, e, 0, 14, len("fflffl fflffl "))
+	// The first line was broken by line wrapping, not a newline character, and has a trailing
+	// whitespace. However, we should never be able to reach the "other side" of such a trailing
+	// whitespace glyph.
+	assertCaret(t, e, 0, 13, len("fflffl fflffl"))
 	e.text.MoveLines(1, selectionClear)
 	assertCaret(t, e, 1, 13, len("fflffl fflffl fflffl fflffl"))
 	e.text.MoveLines(-1, selectionClear)
-	assertCaret(t, e, 0, 14, len("fflffl fflffl "))
+	assertCaret(t, e, 0, 13, len("fflffl fflffl"))
 
 	// Absurdly narrow constraints to force each ligature onto its own line.
 	gtx.Constraints = layout.Exact(image.Pt(10, 10))
@@ -539,7 +541,7 @@ func TestEditorDimensions(t *testing.T) {
 		Queue:       tq,
 		Locale:      english,
 	}
-	cache := text.NewShaper(gofont.Collection())
+	cache := text.NewShaper(text.NoSystemFonts(), text.WithCollection(gofont.Collection()))
 	fontSize := unit.Sp(10)
 	font := font.Font{}
 	dims := e.Layout(gtx, cache, font, fontSize, op.CallOp{}, op.CallOp{})
@@ -586,7 +588,7 @@ func TestEditorCaretConsistency(t *testing.T) {
 		Constraints: layout.Exact(image.Pt(100, 100)),
 		Locale:      english,
 	}
-	cache := text.NewShaper(gofont.Collection())
+	cache := text.NewShaper(text.NoSystemFonts(), text.WithCollection(gofont.Collection()))
 	fontSize := unit.Sp(10)
 	font := font.Font{}
 	for _, a := range []text.Alignment{text.Start, text.Middle, text.End} {
@@ -678,7 +680,7 @@ func TestEditorMoveWord(t *testing.T) {
 			Constraints: layout.Exact(image.Pt(100, 100)),
 			Locale:      english,
 		}
-		cache := text.NewShaper(gofont.Collection())
+		cache := text.NewShaper(text.NoSystemFonts(), text.WithCollection(gofont.Collection()))
 		fontSize := unit.Sp(10)
 		font := font.Font{}
 		e.SetText(t)
@@ -783,7 +785,7 @@ func TestEditorInsert(t *testing.T) {
 			Constraints: layout.Exact(image.Pt(100, 100)),
 			Locale:      english,
 		}
-		cache := text.NewShaper(gofont.Collection())
+		cache := text.NewShaper(text.NoSystemFonts(), text.WithCollection(gofont.Collection()))
 		fontSize := unit.Sp(10)
 		font := font.Font{}
 		e.SetText(t)
@@ -873,7 +875,7 @@ func TestEditorDeleteWord(t *testing.T) {
 			Constraints: layout.Exact(image.Pt(100, 100)),
 			Locale:      english,
 		}
-		cache := text.NewShaper(gofont.Collection())
+		cache := text.NewShaper(text.NoSystemFonts(), text.WithCollection(gofont.Collection()))
 		fontSize := unit.Sp(10)
 		font := font.Font{}
 		e.SetText(t)
@@ -927,7 +929,7 @@ g 2 4 6 8 g
 		Ops:    new(op.Ops),
 		Locale: english,
 	}
-	cache := text.NewShaper(gofont.Collection())
+	cache := text.NewShaper(text.NoSystemFonts(), text.WithCollection(gofont.Collection()))
 	font := font.Font{}
 	fontSize := unit.Sp(10)
 
@@ -1025,7 +1027,7 @@ func TestSelectMove(t *testing.T) {
 		Ops:    new(op.Ops),
 		Locale: english,
 	}
-	cache := text.NewShaper(gofont.Collection())
+	cache := text.NewShaper(text.NoSystemFonts(), text.WithCollection(gofont.Collection()))
 	font := font.Font{}
 	fontSize := unit.Sp(10)
 
@@ -1113,7 +1115,7 @@ func TestEditor_MaxLen(t *testing.T) {
 			key.SelectionEvent{Start: 4, End: 4},
 		),
 	}
-	cache := text.NewShaper(gofont.Collection())
+	cache := text.NewShaper(text.NoSystemFonts(), text.WithCollection(gofont.Collection()))
 	fontSize := unit.Sp(10)
 	font := font.Font{}
 	e.Layout(gtx, cache, font, fontSize, op.CallOp{}, op.CallOp{})
@@ -1144,7 +1146,7 @@ func TestEditor_Filter(t *testing.T) {
 			key.SelectionEvent{Start: 4, End: 4},
 		),
 	}
-	cache := text.NewShaper(gofont.Collection())
+	cache := text.NewShaper(text.NoSystemFonts(), text.WithCollection(gofont.Collection()))
 	fontSize := unit.Sp(10)
 	font := font.Font{}
 	e.Layout(gtx, cache, font, fontSize, op.CallOp{}, op.CallOp{})
@@ -1168,7 +1170,7 @@ func TestEditor_Submit(t *testing.T) {
 			key.EditEvent{Range: key.Range{Start: 0, End: 0}, Text: "ab1\n"},
 		),
 	}
-	cache := text.NewShaper(gofont.Collection())
+	cache := text.NewShaper(text.NoSystemFonts(), text.WithCollection(gofont.Collection()))
 	fontSize := unit.Sp(10)
 	font := font.Font{}
 	e.Layout(gtx, cache, font, fontSize, op.CallOp{}, op.CallOp{})

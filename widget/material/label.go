@@ -29,6 +29,8 @@ type LabelStyle struct {
 	Alignment text.Alignment
 	// MaxLines limits the number of lines. Zero means no limit.
 	MaxLines int
+	// WrapPolicy configures how displayed text will be broken into lines.
+	WrapPolicy text.WrapPolicy
 	// Truncator is the text that will be shown at the end of the final
 	// line if MaxLines is exceeded. Defaults to "…" if empty.
 	Truncator string
@@ -36,6 +38,12 @@ type LabelStyle struct {
 	Text string
 	// TextSize determines the size of the text glyphs.
 	TextSize unit.Sp
+	// LineHeight controls the distance between the baselines of lines of text.
+	// If zero, a sensible default will be used.
+	LineHeight unit.Sp
+	// LineHeightScale applies a scaling factor to the LineHeight. If zero, a
+	// sensible default will be used.
+	LineHeightScale float32
 
 	// Shaper is the text shaper used to display this labe. This field is automatically
 	// set using by all constructor functions. If constructing a LabelStyle literal, you
@@ -103,13 +111,15 @@ func Overline(th *Theme, txt string) LabelStyle {
 }
 
 func Label(th *Theme, size unit.Sp, txt string) LabelStyle {
-	return LabelStyle{
+	l := LabelStyle{
 		Text:           txt,
 		Color:          th.Palette.Fg,
 		SelectionColor: f32color.MulAlpha(th.Palette.ContrastBg, 0x60),
 		TextSize:       size,
 		Shaper:         th.Shaper,
 	}
+	l.Font.Typeface = th.Face
+	return l
 }
 
 func (l LabelStyle) Layout(gtx layout.Context) layout.Dimensions {
@@ -127,12 +137,18 @@ func (l LabelStyle) Layout(gtx layout.Context) layout.Dimensions {
 		l.State.Alignment = l.Alignment
 		l.State.MaxLines = l.MaxLines
 		l.State.Truncator = l.Truncator
+		l.State.WrapPolicy = l.WrapPolicy
+		l.State.LineHeight = l.LineHeight
+		l.State.LineHeightScale = l.LineHeightScale
 		return l.State.Layout(gtx, l.Shaper, l.Font, l.TextSize, textColor, selectColor)
 	}
 	tl := widget.Label{
-		Alignment: l.Alignment,
-		MaxLines:  l.MaxLines,
-		Truncator: l.Truncator,
+		Alignment:       l.Alignment,
+		MaxLines:        l.MaxLines,
+		Truncator:       l.Truncator,
+		WrapPolicy:      l.WrapPolicy,
+		LineHeight:      l.LineHeight,
+		LineHeightScale: l.LineHeightScale,
 	}
 	return tl.Layout(gtx, l.Shaper, l.Font, l.TextSize, l.Text, textColor)
 }
