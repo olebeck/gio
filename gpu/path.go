@@ -203,7 +203,7 @@ func newStenciler(ctx driver.Device) *stenciler {
 	defer vsh.Release()
 	defer fsh.Release()
 	st.pipeline.uniforms = new(stencilUniforms)
-	vertUniforms := newUniformBuffer(ctx, st.pipeline.uniforms)
+	vertUniforms := NewUniformBuffer(ctx, st.pipeline.uniforms)
 	pipe, err := st.ctx.NewPipeline(driver.PipelineDesc{
 		VertexShader:   vsh,
 		FragmentShader: fsh,
@@ -227,7 +227,7 @@ func newStenciler(ctx driver.Device) *stenciler {
 	defer vsh.Release()
 	defer fsh.Release()
 	st.ipipeline.uniforms = new(intersectUniforms)
-	vertUniforms = newUniformBuffer(ctx, &st.ipipeline.uniforms.vert)
+	vertUniforms = NewUniformBuffer(ctx, &st.ipipeline.uniforms.vert)
 	ipipe, err := st.ctx.NewPipeline(driver.PipelineDesc{
 		VertexShader:   vsh,
 		FragmentShader: fsh,

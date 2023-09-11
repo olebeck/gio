@@ -10,6 +10,7 @@ import (
 	"math"
 
 	"gioui.org/f32"
+	"gioui.org/gpu"
 	"gioui.org/internal/ops"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -159,4 +160,14 @@ func FillShape(ops *op.Ops, c color.NRGBA, shape clip.Op) {
 func Fill(ops *op.Ops, c color.NRGBA) {
 	ColorOp{Color: c}.Add(ops)
 	PaintOp{}.Add(ops)
+}
+
+type RenderOp struct {
+	PrepareFunc func(device gpu.Device)
+	RenderFunc  func(device gpu.Device, scale, off f32.Point)
+}
+
+func (r RenderOp) Add(o *op.Ops) {
+	data := ops.Write2(&o.Internal, ops.TypeRenderLen, r.PrepareFunc, r.RenderFunc)
+	data[0] = byte(ops.TypeRender)
 }

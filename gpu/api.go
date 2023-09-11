@@ -35,6 +35,19 @@ type Metal = driver.Metal
 // Vulkan denotes the Vulkan API.
 type Vulkan = driver.Vulkan
 
+// things for RenderOp
+type Device = driver.Device
+type FragmentShader = driver.FragmentShader
+type VertexShader = driver.VertexShader
+type Pipeline = driver.Pipeline
+type PipelineDesc = driver.PipelineDesc
+type VertexLayout = driver.VertexLayout
+type InputDesc = driver.InputDesc
+type Buffer = driver.Buffer
+type Texture = driver.Texture
+type LoadDesc = driver.LoadDesc
+type BlendDesc = driver.BlendDesc
+
 // ErrDeviceLost is returned from GPU operations when the underlying GPU device
 // is lost and should be recreated.
 var ErrDeviceLost = driver.ErrDeviceLost

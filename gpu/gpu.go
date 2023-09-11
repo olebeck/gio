@@ -95,6 +95,9 @@ type drawState struct {
 	image imageOpData
 	// Current paint.ColorOp, if any.
 	color color.NRGBA
+	// Current paint.RenderOp, if any.
+	prepareFunc func(Device)
+	renderFunc  func(Device Device, scale, off f32.Point)
 
 	// Current paint.LinearGradientOp.
 	stop1  f32.Point
@@ -159,6 +162,9 @@ type material struct {
 	// For materialTypeTexture.
 	data    imageOpData
 	uvTrans f32.Affine2D
+	// For materialTypeRender.
+	prepareFunc func(Device)
+	renderFunc  func(Device Device, scale, off f32.Point)
 }
 
 // imageOpData is the shadow of paint.ImageOp.
@@ -251,6 +257,8 @@ type blitColUniforms struct {
 	colorUniforms
 }
 
+type BlitUniforms = blitUniforms
+
 type blitTexUniforms struct {
 	blitUniforms
 }
@@ -261,18 +269,18 @@ type blitLinearGradientUniforms struct {
 	gradientUniforms
 }
 
-type uniformBuffer struct {
-	buf driver.Buffer
+type UniformBuffer struct {
+	Buf driver.Buffer
 	ptr []byte
 }
 
 type pipeline struct {
 	pipeline driver.Pipeline
-	uniforms *uniformBuffer
+	uniforms *UniformBuffer
 }
 
 type blitUniforms struct {
-	transform     [4]float32
+	Transform     [4]float32
 	uvTransformR1 [4]float32
 	uvTransformR2 [4]float32
 }
@@ -298,6 +306,7 @@ const (
 	materialColor materialType = iota
 	materialLinearGradient
 	materialTexture
+	materialRender
 )
 
 // New creates a GPU for the given API.
@@ -549,14 +558,14 @@ func createColorPrograms(b driver.Device, vsSrc shader.Sources, fsSrc [3]shader.
 		if err != nil {
 			return pipelines, err
 		}
-		var vertBuffer *uniformBuffer
+		var vertBuffer *UniformBuffer
 		if u := uniforms[materialTexture]; u != nil {
-			vertBuffer = newUniformBuffer(b, u)
+			vertBuffer = NewUniformBuffer(b, u)
 		}
 		pipelines[materialTexture] = &pipeline{pipe, vertBuffer}
 	}
 	{
-		var vertBuffer *uniformBuffer
+		var vertBuffer *UniformBuffer
 		fsh, err := b.NewFragmentShader(fsSrc[materialColor])
 		if err != nil {
 			pipelines[materialTexture].Release()
@@ -576,12 +585,12 @@ func createColorPrograms(b driver.Device, vsSrc shader.Sources, fsSrc [3]shader.
 			return pipelines, err
 		}
 		if u := uniforms[materialColor]; u != nil {
-			vertBuffer = newUniformBuffer(b, u)
+			vertBuffer = NewUniformBuffer(b, u)
 		}
 		pipelines[materialColor] = &pipeline{pipe, vertBuffer}
 	}
 	{
-		var vertBuffer *uniformBuffer
+		var vertBuffer *UniformBuffer
 		fsh, err := b.NewFragmentShader(fsSrc[materialLinearGradient])
 		if err != nil {
 			pipelines[materialTexture].Release()
@@ -603,7 +612,7 @@ func createColorPrograms(b driver.Device, vsSrc shader.Sources, fsSrc [3]shader.
 			return pipelines, err
 		}
 		if u := uniforms[materialLinearGradient]; u != nil {
-			vertBuffer = newUniformBuffer(b, u)
+			vertBuffer = NewUniformBuffer(b, u)
 		}
 		pipelines[materialLinearGradient] = &pipeline{pipe, vertBuffer}
 	}
@@ -926,6 +935,10 @@ loop:
 		case ops.TypeImage:
 			state.matType = materialTexture
 			state.image = decodeImageOp(encOp.Data, encOp.Refs)
+		case ops.TypeRender:
+			state.matType = materialRender
+			state.prepareFunc = encOp.Refs[0].(func(Device))
+			state.renderFunc = encOp.Refs[1].(func(Device Device, scale, off f32.Point))
 		case ops.TypePaint:
 			// Transform (if needed) the painting rectangle and if so generate a clip path,
 			// for those cases also compute a partialTrans that maps texture coordinates between
@@ -1037,6 +1050,10 @@ func (d *drawState) materialFor(rect f32.Rectangle, off f32.Point, partTrans f32
 		uvScale, uvOffset := texSpaceTransform(sr, sz)
 		m.uvTrans = partTrans.Mul(f32.Affine2D{}.Scale(f32.Point{}, uvScale).Offset(uvOffset))
 		m.data = d.image
+	case materialRender:
+		m.material = materialRender
+		m.prepareFunc = d.prepareFunc
+		m.renderFunc = d.renderFunc
 	}
 	return m
 }
@@ -1056,6 +1073,8 @@ func (r *renderer) prepareDrawOps(cache *resourceCache, ops []imageOp) {
 		switch m.material {
 		case materialTexture:
 			r.ctx.PrepareTexture(r.texHandle(cache, m.data))
+		case materialRender:
+			m.prepareFunc(r.ctx)
 		}
 
 		var fbo stencilFBO
@@ -1074,14 +1093,19 @@ func (r *renderer) prepareDrawOps(cache *resourceCache, ops []imageOp) {
 func (r *renderer) drawOps(cache *resourceCache, ops []imageOp) {
 	var coverTex driver.Texture
 	for _, img := range ops {
+		drc := img.clip
+
+		scale, off := clipSpaceTransform(drc, r.blitter.viewport)
+
 		m := img.material
 		switch m.material {
 		case materialTexture:
 			r.ctx.BindTexture(0, r.texHandle(cache, m.data))
+		case materialRender:
+			m.renderFunc(r.ctx, scale, off)
+			continue
 		}
-		drc := img.clip
 
-		scale, off := clipSpaceTransform(drc, r.blitter.viewport)
 		var fbo stencilFBO
 		switch img.clipType {
 		case clipTypeNone:
@@ -1133,14 +1157,14 @@ func (b *blitter) blit(mat materialType, col f32color.RGBA, col1, col2 f32color.
 		b.linearGradientUniforms.blitUniforms.uvTransformR2 = [4]float32{t4, t5, t6, 0}
 		uniforms = &b.linearGradientUniforms.blitUniforms
 	}
-	uniforms.transform = [4]float32{scale.X, scale.Y, off.X, off.Y}
+	uniforms.Transform = [4]float32{scale.X, scale.Y, off.X, off.Y}
 	p.UploadUniforms(b.ctx)
 	b.ctx.DrawArrays(0, 4)
 }
 
-// newUniformBuffer creates a new GPU uniform buffer backed by the
+// NewUniformBuffer creates a new GPU uniform buffer backed by the
 // structure uniformBlock points to.
-func newUniformBuffer(b driver.Device, uniformBlock interface{}) *uniformBuffer {
+func NewUniformBuffer(b driver.Device, uniformBlock interface{}) *UniformBuffer {
 	ref := reflect.ValueOf(uniformBlock)
 	// Determine the size of the uniforms structure, *uniforms.
 	size := ref.Elem().Type().Size()
@@ -1150,22 +1174,22 @@ func newUniformBuffer(b driver.Device, uniformBlock interface{}) *uniformBuffer 
 	if err != nil {
 		panic(err)
 	}
-	return &uniformBuffer{buf: ubuf, ptr: ptr}
+	return &UniformBuffer{Buf: ubuf, ptr: ptr}
 }
 
-func (u *uniformBuffer) Upload() {
-	u.buf.Upload(u.ptr)
+func (u *UniformBuffer) Upload() {
+	u.Buf.Upload(u.ptr)
 }
 
-func (u *uniformBuffer) Release() {
-	u.buf.Release()
-	u.buf = nil
+func (u *UniformBuffer) Release() {
+	u.Buf.Release()
+	u.Buf = nil
 }
 
 func (p *pipeline) UploadUniforms(ctx driver.Device) {
 	if p.uniforms != nil {
 		p.uniforms.Upload()
-		ctx.BindUniforms(p.uniforms.buf)
+		ctx.BindUniforms(p.uniforms.Buf)
 	}
 }
 
