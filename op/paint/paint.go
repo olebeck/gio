@@ -16,20 +16,23 @@ import (
 	"gioui.org/op/clip"
 )
 
-type TextureFilter uint8
+// ImageFilter is the scaling filter for images.
+type ImageFilter byte
 
 const (
-	FilterNearest TextureFilter = iota
-	FilterLinear
-	FilterLinearMipmapLinear
+	// FilterLinear uses linear interpolation for scaling.
+	FilterLinear ImageFilter = iota
+	// FilterNearest uses nearest neighbor interpolation for scaling.
+	FilterNearest
 )
 
 // ImageOp sets the brush to an image.
 type ImageOp struct {
+	Filter ImageFilter
+
 	uniform bool
 	color   color.NRGBA
 	src     *image.RGBA
-	filter  TextureFilter
 
 	// handle is a key to uniquely identify this ImageOp
 	// in a map of cached textures.
@@ -54,6 +57,14 @@ type LinearGradientOp struct {
 type PaintOp struct {
 }
 
+// OpacityStack represents an opacity applied to all painting operations
+// until Pop is called.
+type OpacityStack struct {
+	id      ops.StackID
+	macroID uint32
+	ops     *ops.Ops
+}
+
 // NewImageOp creates an ImageOp backed by src.
 //
 // NewImageOp assumes the backing image is immutable, and may cache a
@@ -61,10 +72,6 @@ type PaintOp struct {
 // ensure that changes to an image is reflected in the display of
 // it.
 func NewImageOp(src image.Image) ImageOp {
-	return NewImageOpFilter(src, FilterLinear)
-}
-
-func NewImageOpFilter(src image.Image, filter TextureFilter) ImageOp {
 	switch src := src.(type) {
 	case *image.Uniform:
 		col := color.NRGBAModel.Convert(src.C).(color.NRGBA)
@@ -76,7 +83,6 @@ func NewImageOpFilter(src image.Image, filter TextureFilter) ImageOp {
 		return ImageOp{
 			src:    src,
 			handle: new(int),
-			filter: filter,
 		}
 	}
 
@@ -110,7 +116,7 @@ func (i ImageOp) Add(o *op.Ops) {
 	}
 	data := ops.Write2(&o.Internal, ops.TypeImageLen, i.src, i.handle)
 	data[0] = byte(ops.TypeImage)
-	data[1] = byte(i.filter)
+	data[1] = byte(i.Filter)
 }
 
 func (c ColorOp) Add(o *op.Ops) {
@@ -170,4 +176,32 @@ type RenderOp struct {
 func (r RenderOp) Add(o *op.Ops) {
 	data := ops.Write2(&o.Internal, ops.TypeRenderLen, r.PrepareFunc, r.RenderFunc)
 	data[0] = byte(ops.TypeRender)
+}
+
+// PushOpacity creates a drawing layer with an opacity in the range [0;1].
+// The layer includes every subsequent drawing operation until [OpacityStack.Pop]
+// is called.
+//
+// The layer is drawn in two steps. First, the layer operations are
+// drawn to a separate image. Then, the image is blended on top of
+// the frame, with the opacity used as the blending factor.
+func PushOpacity(o *op.Ops, opacity float32) OpacityStack {
+	if opacity > 1 {
+		opacity = 1
+	}
+	if opacity < 0 {
+		opacity = 0
+	}
+	id, macroID := ops.PushOp(&o.Internal, ops.OpacityStack)
+	data := ops.Write(&o.Internal, ops.TypePushOpacityLen)
+	bo := binary.LittleEndian
+	data[0] = byte(ops.TypePushOpacity)
+	bo.PutUint32(data[1:], math.Float32bits(opacity))
+	return OpacityStack{ops: &o.Internal, id: id, macroID: macroID}
+}
+
+func (t OpacityStack) Pop() {
+	ops.PopOp(t.ops, ops.OpacityStack, t.id, t.macroID)
+	data := ops.Write(t.ops, ops.TypePopOpacityLen)
+	data[0] = byte(ops.TypePopOpacity)
 }
